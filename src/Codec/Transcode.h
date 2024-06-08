@@ -57,7 +57,11 @@ public:
 
 private:
     int _target_channels;
+#if (LIBAVCODEC_VERSION_MAJOR < 61)
     int _target_channel_layout;
+#else
+    AVChannelLayout *_target_channel_layout;
+#endif
     int _target_samplerate;
     AVSampleFormat _target_format;
     SwrContext *_ctx = nullptr;
