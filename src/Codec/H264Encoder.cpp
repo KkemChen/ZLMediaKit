@@ -215,7 +215,7 @@ Value的值就是fps。
  int i_threads;  Parallel encoding of multiple frames
  int b_deterministic; Whether to allow non-deterministic thread optimization
  int i_sync_lookahead;  Thread pre-buffering
- 
+
  Video attributes
  int i_width;  Width
  int i_height;  Height
@@ -228,9 +228,9 @@ Value的值就是fps。
  they will be reduced to be 0 < x <= 65535 and prime
  int i_sar_height;
  int i_sar_width;  Set aspect ratio
- 
+
  int i_overscan;  0=undef, 1=no overscan, 2=overscan Overscan lines, default "undef" (not set), options: show (watch) / crop (remove)
- 
+
  See the following value h264 appendix E
  Int i_vidformat; Video format, default "undef", component/pal/ntsc/secam/mac/undef
  int b_fullrange; Specify full range samples setting, default "off", options: off/on
@@ -239,7 +239,7 @@ Value的值就是fps。
  int i_colmatrix; Chroma matrix setting, default "undef", undef/bt709/fcc/bt470bg, smpte170m/smpte240m/GBR/YCgCo
  int i_chroma_loc;  both top & bottom chroma samples specified, range 0~5, default 0
  } vui;
- 
+
  int i_fps_num;
  int i_fps_den;
  These two parameters are determined by the fps frame rate, the assignment process is as follows:
@@ -255,7 +255,7 @@ Value的值就是fps。
  b_error = 1;
  }
  The value of Value is fps.
- 
+
  Stream parameters
  int i_frame_reference;  Maximum number of reference frames
  int i_keyint_max;  Set IDR keyframe at this interval
@@ -272,7 +272,7 @@ Value的值就是fps。
  Entropy coding
  int b_cabac;
  int i_cabac_init_idc;
- 
+
  int b_interlaced;  Interlaced scanning
  Quantization
  int i_cqm_preset; Custom quantization matrix (CQM), initialize quantization mode to flat
@@ -283,25 +283,25 @@ Value的值就是fps。
  uint8_t cqm_4pc[16];
  uint8_t cqm_8iy[64];
  uint8_t cqm_8py[64];
- 
+
  Log
  void (*pf_log)( void *, int i_level, const char *psz, va_list );
  void *p_log_private;
  int i_log_level;
  int b_visualize;
  char *psz_dump_yuv;  Name of the reconstructed frame
- 
+
  Encoding analysis parameters
  struct
  {
  unsigned int intra;  Inter-frame partition
  unsigned int inter;  Intra-frame partition
- 
+
  int b_transform_8x8;  Inter-frame partition
  int b_weighted_bipred; Implicit weighting for b frames
  int i_direct_mv_pred; Time-space motion prediction
  int i_chroma_qp_offset; Chroma quantization step offset
- 
+
  int i_me_method;  Motion estimation algorithm (X264_ME_*)
  int i_me_range;  Integer pixel motion estimation search range (from predicted mv)
  int i_mv_range;  Maximum length of motion vector (in pixels). -1 = auto, based on level
@@ -309,51 +309,46 @@ Value的值就是fps。
  int i_subpel_refine;  Sub-pixel motion estimation quality
  int b_chroma_me;  Sub-pixel chroma motion estimation and mode selection for P frames
  int b_mixed_references; Allow each macroblock partition in the P frame to have its own reference number
- int i_trellis;  Trellis quantization, find the appropriate quantization value for each 8x8 block, requires CABAC, default 0 0: off 1: use only at the end of encoding 2: always use
- int b_fast_pskip; Fast P frame skip detection
- int b_dct_decimate;  Transform parameter domain in P-frames
- int i_noise_reduction; Adaptive pseudo-blind area
- float f_psy_rd;  Psy RD strength
- float f_psy_trellis;  Psy trellis strength
- int b_psy;  Toggle all psy optimizations
- 
+ int i_trellis;  Trellis quantization, find the appropriate quantization value for each 8x8 block, requires CABAC, default 0 0: off 1: use only at the end of
+encoding 2: always use int b_fast_pskip; Fast P frame skip detection int b_dct_decimate;  Transform parameter domain in P-frames int i_noise_reduction; Adaptive
+pseudo-blind area float f_psy_rd;  Psy RD strength float f_psy_trellis;  Psy trellis strength int b_psy;  Toggle all psy optimizations
+
  , the size of the invalid area used in luminance quantization
  int i_luma_deadzone[2];  {Inter-frame, Intra-frame}
- 
+
  int b_psnr;  Calculate and print PSNR information
  int b_ssim; Calculate and print SSIM information
  } analyse;
- 
+
  Bitrate control parameters
  struct
  {
  int i_rc_method;  X264_RC_*
- 
+
  int i_qp_constant;  0-51
  int i_qp_min; Minimum quantization value allowed
  int i_qp_max; Maximum quantization value allowed
  int i_qp_step; Maximum quantization step between frames
- 
+
  int i_bitrate; Set average bitrate
  float f_rf_constant;  1pass VBR, nominal QP
  float f_rate_tolerance;
  int i_vbv_max_bitrate; In average bitrate mode, the maximum instantaneous bitrate, default 0 (same as -B setting)
  int i_vbv_buffer_size; Size of the bitrate control buffer, unit kbit, default 0
- float f_vbv_buffer_init;  <=1: fraction of buffer_size. >1: kbit bitrate control buffer data retention maximum data amount ratio to buffer size, range 0~1.0, default 0.9
- float f_ip_factor;
- float f_pb_factor;
- 
+ float f_vbv_buffer_init;  <=1: fraction of buffer_size. >1: kbit bitrate control buffer data retention maximum data amount ratio to buffer size, range 0~1.0,
+default 0.9 float f_ip_factor; float f_pb_factor;
+
  int i_aq_mode;  psy adaptive QP. (X264_AQ_*)
  float f_aq_strength;
  int b_mb_tree;  Macroblock-tree ratecontrol.
  int i_lookahead;
- 
+
  2pass multiple compression bitrate control
  int b_stat_write;  Enable stat writing in psz_stat_out
  char *psz_stat_out;
  int b_stat_read;  Read stat from psz_stat_in and use it
  char *psz_stat_in;
- 
+
  2pass params (same as ffmpeg ones)
  float f_qcompress;  0.0 => cbr, 1.0 => constant qp
  float f_qblur; Quantization blur over time
@@ -362,17 +357,17 @@ Value的值就是fps。
  int i_zones;  number of zone_t's
  char *psz_zones; Another way to specify the zone
  } rc;
- 
+
  Muxing parameters
  int b_aud; Generate access unit delimiter
  int b_repeat_headers;  Place SPS/PPS before each keyframe
  int i_sps_id;  SPS and PPS id number
- 
+
  Slice (like strip) parameters
  int i_slice_max_size;  Maximum number of bytes per slice, including expected NAL overhead.
  int i_slice_max_mbs;  Maximum number of macroblocks per slice, overwrite i_slice_count
  int i_slice_count;  Number of strips per frame: Set rectangular strips.
- 
+
  Optional callback for freeing this x264_param_t when it is done being used.
  * Only used when the x264_param_t sits in memory for an indefinite period of time,
  * i.e. when an x264_param_t is passed to x264_t in an x264_picture_t or in zones.
@@ -394,21 +389,21 @@ bool H264Encoder::init(int iWidth, int iHeight, int iFps, int iBitRate) {
     x264_param_default_preset(pX264Param, "ultrafast", "zerolatency");
 
     //* cpuFlags
-    pX264Param->i_threads = X264_SYNC_LOOKAHEAD_AUTO;        //* 取空缓冲区继续使用不死锁的保证.
+    pX264Param->i_threads = X264_SYNC_LOOKAHEAD_AUTO; //* 取空缓冲区继续使用不死锁的保证.
     //* video Properties
     pX264Param->i_width = iWidth; //* 宽度.
     pX264Param->i_height = iHeight; //* 高度
     pX264Param->i_frame_total = 0; //* 编码总帧数.不知道用0.
-    pX264Param->i_keyint_max = iFps * 3; //ffmpeg:gop_size 关键帧最大间隔
-    pX264Param->i_keyint_min = iFps * 1; //ffmpeg:keyint_min 关键帧最小间隔
+    pX264Param->i_keyint_max = iFps * 2; // ffmpeg:gop_size 关键帧最大间隔
+    pX264Param->i_keyint_min = iFps * 1; // ffmpeg:keyint_min 关键帧最小间隔
     //* Rate control Parameters
-    pX264Param->rc.i_bitrate = iBitRate / 1000;        //* 码率(比特率,单位Kbps)
-    pX264Param->rc.i_qp_step = 1;    //最大的在帧与帧之间进行切变的量化因子的变化量。ffmpeg:max_qdiff
-    pX264Param->rc.i_qp_min = 10;    //ffmpeg:qmin;最小的量化因子。取值范围1-51。建议在10-30之间。
-    pX264Param->rc.i_qp_max = 41;    //ffmpeg:qmax;最大的量化因子。取值范围1-51。建议在10-30之间。
-    pX264Param->rc.f_qcompress = 0.6;//ffmpeg:qcompress 量化器压缩比率0-1.越小则比特率越区域固定，但是越高越使量化器参数越固定
-    pX264Param->analyse.i_me_range = 16;        //ffmpeg:me_range 运动侦测的半径
-    pX264Param->i_frame_reference = 3;        //ffmpeg:refsB和P帧向前预测参考的帧数。取值范围1-16。
+    pX264Param->rc.i_bitrate = iBitRate / 1000; //* 码率(比特率,单位Kbps)
+    pX264Param->rc.i_qp_step = 4; // 最大的在帧与帧之间进行切变的量化因子的变化量。ffmpeg:max_qdiff
+    pX264Param->rc.i_qp_min = 20; // ffmpeg:qmin;最小的量化因子。取值范围1-51。建议在10-30之间。
+    pX264Param->rc.i_qp_max = 51; // ffmpeg:qmax;最大的量化因子。取值范围1-51。建议在10-30之间。
+    pX264Param->rc.f_qcompress = 0.6; // ffmpeg:qcompress 量化器压缩比率0-1.越小则比特率越区域固定，但是越高越使量化器参数越固定
+    pX264Param->analyse.i_me_range = 8; // ffmpeg:me_range 运动侦测的半径
+    pX264Param->i_frame_reference = 1; // ffmpeg:refsB和P帧向前预测参考的帧数。取值范围1-16。
     // 该值不影响解码的速度，但是越大解码  [AUTO-TRANSLATED:23eb12ae]
     // This value does not affect the decoding speed, but the larger the decoding
     // 所需的内存越大。这个值在一般情况下  [AUTO-TRANSLATED:3ff4f036]
@@ -418,10 +413,10 @@ bool H264Encoder::init(int iWidth, int iHeight, int iFps, int iBitRate) {
     // 不明显了。  [AUTO-TRANSLATED:d654ba67]
     // It's not obvious.
 
-    pX264Param->analyse.i_trellis = 1;                            //ffmpeg:trellis
+    pX264Param->analyse.i_trellis = 0; // ffmpeg:trellis
     // pX264Param->analyse.i_me_method=X264_ME_DIA;//ffmpeg:me_method ME_ZERO 运动侦测的方式  [AUTO-TRANSLATED:24c6240d]
     // pX264Param->analyse.i_me_method=X264_ME_DIA;//ffmpeg:me_method ME_ZERO Motion detection method
-    pX264Param->rc.f_qblur = 0.5;        //ffmpeg:qblur
+    pX264Param->rc.f_qblur = 0.5; // ffmpeg:qblur
 
     //* bitstream parameters
     /*open-GOP
@@ -455,18 +450,16 @@ bool H264Encoder::init(int iWidth, int iHeight, int iFps, int iBitRate) {
      The decoding of all frames after I0 does not depend on the frames before I0, and the dts of all frames after I0 is greater than that of I0.
      If the bitstream is IDR0 B0 B1 P0 B2 B3... then this GOP is close-GOP, although the dst of B0, B1 is smaller than that of IDR0,
      But both the encoder and decoder refresh the reference buffer, B0, B1 cannot refer to the forward GOP frame.
-     For the encoding end, if the encoding frame type is determined as follows: ...P0 B1 B2 P3 B4 B5 I6 This will output an open-Gop bitstream (P0 P3 B1 B2 I6 B4 B5...),
-     The decoding of B4 B5 depends on P3.
-     If the encoding frame type is determined as follows...P0 B1 B2 P3 B4 P5 I6, then this will not output an open-GOP bitstream (P0 P3 B1 B2 P5 B4 I6...).
-     The difference between the two is whether the 5th frame before I6 is set to B frame or P frame,
-     If the last frame of a GOP (the 5th frame in the example above) is set to B frame,
-     This bitstream is open-GOP, and setting it to P frame is close-GOP.
-     Since B frames have better compression performance than P frames, open-GOP performs slightly better than close-GOP in terms of encoding performance,
-     But for compatibility and less trouble, it's better to turn off opne-GOP.
+     For the encoding end, if the encoding frame type is determined as follows: ...P0 B1 B2 P3 B4 B5 I6 This will output an open-Gop bitstream (P0 P3 B1 B2 I6
+     B4 B5...), The decoding of B4 B5 depends on P3. If the encoding frame type is determined as follows...P0 B1 B2 P3 B4 P5 I6, then this will not output an
+     open-GOP bitstream (P0 P3 B1 B2 P5 B4 I6...). The difference between the two is whether the 5th frame before I6 is set to B frame or P frame, If the last
+     frame of a GOP (the 5th frame in the example above) is set to B frame, This bitstream is open-GOP, and setting it to P frame is close-GOP. Since B frames
+     have better compression performance than P frames, open-GOP performs slightly better than close-GOP in terms of encoding performance, But for compatibility
+     and less trouble, it's better to turn off opne-GOP.
      * [AUTO-TRANSLATED:6ccfc922]
      但为了兼容性和少一些麻烦，还是把opne-GOP关闭的好。*/
     pX264Param->b_open_gop = 0;
-    pX264Param->i_bframe = 0;        //最大B帧数.
+    pX264Param->i_bframe = 0; // 最大B帧数.
     pX264Param->i_bframe_pyramid = 0;
     pX264Param->i_bframe_adaptive = X264_B_ADAPT_TRELLIS;
     //* Log
@@ -478,15 +471,15 @@ bool H264Encoder::init(int iWidth, int iHeight, int iFps, int iBitRate) {
     pX264Param->i_timebase_den = pX264Param->i_fps_num;
     pX264Param->i_timebase_num = pX264Param->i_fps_den;
 
-    pX264Param->analyse.i_subpel_refine = 1; //这个参数控制在运动估算过程中质量和速度的权衡。Subq=5可以压缩>10%于subq=1。1-7
-    pX264Param->analyse.b_fast_pskip = 1; //在P帧内执行早期快速跳跃探测。这个经常在没有任何损失的前提下提高了速度。
+    pX264Param->analyse.i_subpel_refine = 1; // 这个参数控制在运动估算过程中质量和速度的权衡。Subq=5可以压缩>10%于subq=1。1-7
+    pX264Param->analyse.b_fast_pskip = 1; // 在P帧内执行早期快速跳跃探测。这个经常在没有任何损失的前提下提高了速度。
 
-    pX264Param->b_annexb = 1; //1前面为0x00000001,0为nal长度
-    pX264Param->b_repeat_headers = 1; //关键帧前面是否放sps跟pps帧，0 否 1，放
+    pX264Param->b_annexb = 1; // 1前面为0x00000001,0为nal长度
+    pX264Param->b_repeat_headers = 1; // 关键帧前面是否放sps跟pps帧，0 否 1，放
 
     // * 设置Profile.使用baseline  [AUTO-TRANSLATED:c451b8a5]
     // * Set Profile. Use baseline
-    x264_param_apply_profile(pX264Param, "high");
+    x264_param_apply_profile(pX264Param, "main");
 
     // * 打开编码器句柄,通过x264_encoder_parameters得到设置给X264  [AUTO-TRANSLATED:e52faa11]
     // * Open encoder handle, get the settings for X264 through x264_encoder_parameters
@@ -506,13 +499,13 @@ bool H264Encoder::init(int iWidth, int iHeight, int iFps, int iBitRate) {
 }
 
 int H264Encoder::inputData(char *yuv[3], int linesize[3], int64_t cts, H264Frame **out_frame) {
-    //TimeTicker1(5);
+    // TimeTicker1(5);
     _pPicIn->img.i_stride[0] = linesize[0];
     _pPicIn->img.i_stride[1] = linesize[1];
     _pPicIn->img.i_stride[2] = linesize[2];
-    _pPicIn->img.plane[0] = (uint8_t *) yuv[0];
-    _pPicIn->img.plane[1] = (uint8_t *) yuv[1];
-    _pPicIn->img.plane[2] = (uint8_t *) yuv[2];
+    _pPicIn->img.plane[0] = (uint8_t *)yuv[0];
+    _pPicIn->img.plane[1] = (uint8_t *)yuv[1];
+    _pPicIn->img.plane[2] = (uint8_t *)yuv[2];
     _pPicIn->i_pts = cts;
     int iNal;
     x264_nal_t *pNals;
@@ -535,20 +528,4 @@ int H264Encoder::inputData(char *yuv[3], int linesize[3], int64_t cts, H264Frame
 
 } /* namespace mediakit */
 
-#endif //ENABLE_X264
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#endif // ENABLE_X264

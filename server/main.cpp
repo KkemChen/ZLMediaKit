@@ -236,8 +236,8 @@ int start_main(int argc,char *argv[]) {
         g_ini_file = cmd_main["config"];
         string ssl_file = cmd_main["ssl"];
         int threads = cmd_main["threads"];
-        bool affinity = cmd_main["affinity"];
-
+        // bool affinity = cmd_main["affinity"];
+        bool affinity = false;
         // 设置日志  [AUTO-TRANSLATED:50372045]
         // Set log
         Logger::Instance().add(std::make_shared<ConsoleChannel>("ConsoleChannel", logLevel));
@@ -324,7 +324,7 @@ int start_main(int argc,char *argv[]) {
         EventPollerPool::setPoolSize(threads);
         WorkThreadPool::setPoolSize(threads);
         EventPollerPool::enableCpuAffinity(affinity);
-
+        EventPollerPool::enableCpuAffinity(affinity);
         // 简单的telnet服务器，可用于服务器调试，但是不能使用23端口，否则telnet上了莫名其妙的现象  [AUTO-TRANSLATED:f9324c6e]
         // Simple telnet server, can be used for server debugging, but cannot use port 23, otherwise telnet will have inexplicable phenomena
         // 测试方法:telnet 127.0.0.1 9000  [AUTO-TRANSLATED:de0ac883]
