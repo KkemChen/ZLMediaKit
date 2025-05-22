@@ -69,7 +69,7 @@ set(SOCKET_DEFAULT_BUF_SIZE 262144 CACHE STRING "Default buffer size for socket"
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
   set(CMAKE_BUILD_TYPE "Debug")
 endif()
- set(CMAKE_BUILD_TYPE "Release")
+
 message(STATUS "编译类型: ${CMAKE_BUILD_TYPE}")
 
 # 方便排查编译问题, 需要 FORCE CACHE, 否则需要命令行设置才生效

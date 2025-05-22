@@ -37,7 +37,7 @@ Param::~Param() {
     VideoStackManager::Instance().unrefChannel(id, width, height, pixfmt); 
 }
 
-Channel::Channel(const std::string& id, int width, int height, AVPixelFormat pixfmt)
+VideoChannel::VideoChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt)
     : _id(id), _width(width), _height(height), _pixfmt(pixfmt) {
 #if defined(VIDEOSTACK_KEEP_ASPECT_RATIO)
     _keepAspectRatio = true;
@@ -59,13 +59,13 @@ Channel::Channel(const std::string& id, int width, int height, AVPixelFormat pix
     resizeFrame(frame);
 }
 
-void Channel::addParam(const std::weak_ptr<Param>& p) {
+void VideoChannel::addParam(const std::weak_ptr<Param>& p) {
     std::lock_guard<std::recursive_mutex> lock(_mx);
     _params.push_back(p);
 }
 
-void Channel::onFrame(const mediakit::FFmpegFrame::Ptr& frame) {
-    std::weak_ptr<Channel> weakSelf = shared_from_this();
+void VideoChannel::onFrame(const mediakit::FFmpegFrame::Ptr& frame) {
+    std::weak_ptr<VideoChannel> weakSelf = shared_from_this();
     _poller = _poller ? _poller : toolkit::WorkThreadPool::Instance().getPoller();
     _poller->async([weakSelf, frame]() {
         auto self = weakSelf.lock();
@@ -75,17 +75,17 @@ void Channel::onFrame(const mediakit::FFmpegFrame::Ptr& frame) {
     });
 }
 
-void Channel::forEachParam(const std::function<void(const Param::Ptr&)>& func) {
+void VideoChannel::forEachParam(const std::function<void(const Param::Ptr&)>& func) {
     for (auto& wp : _params) {
         if (auto sp = wp.lock()) { func(sp); }
     }
 }
 
-void Channel::fillBuffer(const Param::Ptr& p) {
+void VideoChannel::fillBuffer(const Param::Ptr& p) {
     if (auto buf = p->weak_buf.lock()) { copyData(buf, p); }
 }
 
-void Channel::copyData(const mediakit::FFmpegFrame::Ptr& buf, const Param::Ptr& p) {
+void VideoChannel::copyData(const mediakit::FFmpegFrame::Ptr& buf, const Param::Ptr& p) {
 
     switch (p->pixfmt) {
         case AV_PIX_FMT_YUV420P: {
@@ -120,7 +120,7 @@ void Channel::copyData(const mediakit::FFmpegFrame::Ptr& buf, const Param::Ptr& 
     }
 }
 
-void Channel::resizeFrame(const mediakit::FFmpegFrame::Ptr &frame) {
+void VideoChannel::resizeFrame(const mediakit::FFmpegFrame::Ptr &frame) {
     if (_keepAspectRatio) {
         resizeFrameImplWithAspectRatio(frame);
     } else {
@@ -128,7 +128,7 @@ void Channel::resizeFrame(const mediakit::FFmpegFrame::Ptr &frame) {
     }
 }
 
-void Channel::resizeFrameImplWithAspectRatio(const mediakit::FFmpegFrame::Ptr &frame) {
+void VideoChannel::resizeFrameImplWithAspectRatio(const mediakit::FFmpegFrame::Ptr &frame) {
     int srcWidth = frame->get()->width;
     int srcHeight = frame->get()->height;
     if (srcWidth <= 0 || srcHeight <= 0) {
@@ -183,7 +183,7 @@ void Channel::resizeFrameImplWithAspectRatio(const mediakit::FFmpegFrame::Ptr &f
 
 }
 
-void Channel::resizeFrameImplWithoutAspectRatio(const mediakit::FFmpegFrame::Ptr &frame) {
+void VideoChannel::resizeFrameImplWithoutAspectRatio(const mediakit::FFmpegFrame::Ptr &frame) {
     if (!_sws) {
         fill_yuv_func(_tmp, 16, 128, 128);
         _sws = std::make_shared<mediakit::FFmpegSws>(_pixfmt, _width, _height);
@@ -191,14 +191,14 @@ void Channel::resizeFrameImplWithoutAspectRatio(const mediakit::FFmpegFrame::Ptr
     _tmp = _sws->inputFrame(frame);
 }
 
-void StackPlayer::addChannel(const std::weak_ptr<Channel>& chn) {
-    std::lock_guard<std::recursive_mutex> lock(_mx_chn);
-    _channels.push_back(chn);
+void StackPlayer::addVideoChannel(const std::weak_ptr<VideoChannel>& chn) {
+    std::lock_guard<std::recursive_mutex> lock(_mx_video_chn);
+    _video_channels.push_back(chn);
 }
 
-void StackPlayer::addMixer(const std::string &url, const std::weak_ptr<AudioMixer> &mixer) {
-    std::lock_guard<std::recursive_mutex> lock(_mx_mixer);
-    _mixers[url] = mixer;
+void StackPlayer::addAudioChannel(const std::weak_ptr<AudioChannel> &chn) {
+    std::lock_guard<std::recursive_mutex> lock(_mx_audio_chn);
+    _audio_channels.push_back(chn);
 }
 
 void StackPlayer::play() {
@@ -247,7 +247,7 @@ void StackPlayer::play() {
                 auto self = weakSelf.lock();
                 if (!self) { return; }
 
-                self->onFrame(frame);
+                self->onVideoFrame(frame);
             });
 
             videoTrack->addDelegate([decoder](const mediakit::Frame::Ptr& frame) {
@@ -259,18 +259,19 @@ void StackPlayer::play() {
             auto decoder = std::make_shared<mediakit::FFmpegDecoder>(audioTrack, 0);
             AVChannelLayout mono_layout;
             av_channel_layout_from_string(&mono_layout, "mono");
-            auto swr = std::make_shared<mediakit::FFmpegSwr>(AudioMixer::SAMPLE_FORMAT, &mono_layout, AudioMixer::SAMPLE_RATE);
+            mono_layout.nb_channels = 1;
+            auto swr = std::make_shared<mediakit::FFmpegSwr>(AudioChannel::SAMPLE_FORMAT, &mono_layout, AudioChannel::SAMPLE_RATE);
             av_channel_layout_uninit(&mono_layout);
             auto dec_ctx = decoder->getContext();
-            self->onAddAudioInput();
+            
             decoder->setOnDecode([weakSelf, swr, dec_ctx](const mediakit::FFmpegFrame::Ptr &frame) mutable {
                 auto self = weakSelf.lock();
                 if (!self) {
                     return;
                 }
 
-                auto out_frame = swr->inputFrame(frame);
-                self->onAudioFrame(out_frame);
+                auto swr_frame = swr->inputFrame(frame);
+                self->onAudioFrame(swr_frame);
             });
 
             audioTrack->addDelegate((std::function<bool(const mediakit::Frame::Ptr &)>)[decoder](const mediakit::Frame::Ptr &frame) {
@@ -288,23 +289,22 @@ void StackPlayer::play() {
         if (!self) { return; }
 
         self->onDisconnect();
-        self->onRemoveAudioInput();
         self->rePlay(url);
     });
 
     _player->play(url);
 }
 
-void StackPlayer::onFrame(const mediakit::FFmpegFrame::Ptr& frame) {
-    std::lock_guard<std::recursive_mutex> lock(_mx_chn);
-    for (auto& weak_chn : _channels) {
+void StackPlayer::onVideoFrame(const mediakit::FFmpegFrame::Ptr& frame) {
+    std::lock_guard<std::recursive_mutex> lock(_mx_video_chn);
+    for (auto& weak_chn : _video_channels) {
         if (auto chn = weak_chn.lock()) { chn->onFrame(frame); }
     }
 }
 
 void StackPlayer::onDisconnect() {
-    std::lock_guard<std::recursive_mutex> lock(_mx_chn);
-    for (auto& weak_chn : _channels) {
+    std::lock_guard<std::recursive_mutex> lock(_mx_video_chn);
+    for (auto& weak_chn : _video_channels) {
         if (auto chn = weak_chn.lock()) {
             auto frame = VideoStackManager::Instance().getBgImg();
             chn->onFrame(frame);
@@ -323,6 +323,15 @@ void StackPlayer::rePlay(const std::string& url) {
         self->_player->play(url);
         return false;
     }, nullptr);
+}
+
+void StackPlayer::onAudioFrame(const mediakit::FFmpegFrame::Ptr &frame) {
+    std::lock_guard<std::recursive_mutex> lock(_mx_audio_chn);
+    for (auto &weak_chn : _audio_channels) {
+        if (auto chn = weak_chn.lock()) {
+            chn->inputFrame(frame);
+        }
+    }
 }
 
 VideoStack::VideoStack(const std::string& id, int width, int height, AVPixelFormat pixfmt,
@@ -349,25 +358,16 @@ VideoStack::VideoStack(const std::string& id, int width, int height, AVPixelForm
 
     mediakit::AudioInfo a_info;
     a_info.codecId = mediakit::CodecAAC;
-    a_info.iSampleRate = AudioMixer::SAMPLE_RATE;
-    a_info.iChannel = AudioMixer::CHANNELS;
-    a_info.iSampleBit = av_get_bytes_per_sample(AudioMixer::SAMPLE_FORMAT) * 8;
+    a_info.iSampleRate = AudioChannel::SAMPLE_RATE;
+    a_info.iChannel = AudioChannel::CHANNELS;
+    a_info.iSampleBit = av_get_bytes_per_sample(AudioChannel::SAMPLE_FORMAT) * 8;
 
     _dev->initVideo(v_info);
     _dev->initAudio(a_info);
 
     _mixer = std::make_shared<AudioMixer>();
-    _mixer->setOutputCallback([&](mediakit::FFmpegFrame::Ptr frame) {
-        int bytes = av_samples_get_buffer_size(
-            NULL,
-            frame->get()->ch_layout.nb_channels, // 声道数
-            frame->get()->nb_samples, // 每声道采样数
-            AudioMixer::SAMPLE_FORMAT, // AVSampleFormat
-            1); // align=1 → 不加 32B 对齐
-
-        int64_t pts_ms = _total_samples * 1000LL / frame->get()->sample_rate;
-        _dev->inputPCM((char *)frame->get()->data[0], bytes, pts_ms);
-        _total_samples += frame->get()->nb_samples;
+    _mixer->setOnOutputFrame([&](const std::shared_ptr<AVPacket> &pkt, const std::array<uint8_t, 7>& adtsHeader) {
+        _dev->inputAAC((char*)pkt->data, pkt->size, pkt->pts, (char*)adtsHeader.data());
     });
 
     _dev->addTrackCompleted();
@@ -375,6 +375,7 @@ VideoStack::VideoStack(const std::string& id, int width, int height, AVPixelForm
 }
 
 VideoStack::~VideoStack() {
+    _mixer->stop();
     _isExit = true;
     if (_thread.joinable()) { _thread.join(); }
 }
@@ -399,6 +400,11 @@ void VideoStack::setParam(const Params& params) {
     _params = params;
 }
 
+void VideoStack::run() {
+    _mixer->start();
+    start();
+}
+
 void VideoStack::start() {
     _thread = std::thread([&]() {
         uint64_t pts = 0;
@@ -409,7 +415,7 @@ void VideoStack::start() {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastEncTP);
             if (elapsed >= std::chrono::milliseconds(frameInterval)) {
                 lastEncTP = std::chrono::steady_clock::now();
-               _dev->inputYUV((char **)_buffer->get()->data, _buffer->get()->linesize, pts);
+                _dev->inputYUV((char **)_buffer->get()->data, _buffer->get()->linesize, pts);
                 pts += frameInterval;
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(frameInterval) - elapsed);
@@ -417,6 +423,7 @@ void VideoStack::start() {
         }
     });
 }
+
 
 void VideoStack::initBgColor() {
     // 填充底色  [AUTO-TRANSLATED:ee9bbd46]
@@ -432,7 +439,7 @@ void VideoStack::initBgColor() {
     fill_yuv_func(_buffer, Y, U, V);
 }
 
-Channel::Ptr VideoStackManager::getChannel(const std::string& id, int width, int height,
+VideoChannel::Ptr VideoStackManager::getChannel(const std::string& id, int width, int height,
                                            AVPixelFormat pixfmt) {
 
     std::lock_guard<std::recursive_mutex> lock(_mx);
@@ -481,7 +488,7 @@ int VideoStackManager::startVideoStack(const Json::Value& json) {
 
     stack->setParam(params);
     stack->setMixer(players);
-    stack->start();
+    stack->run();
 
     std::lock_guard<std::recursive_mutex> lock(_mx);
     _stackMap[id] = stack;
@@ -638,7 +645,7 @@ bool VideoStackManager::loadBgImg(const std::string& path) {
 
 void VideoStackManager::clear() { _stackMap.clear(); }
 
-Channel::Ptr VideoStackManager::createChannel(const std::string& id, int width, int height,
+VideoChannel::Ptr VideoStackManager::createChannel(const std::string& id, int width, int height,
                                               AVPixelFormat pixfmt) {
 
     std::lock_guard<std::recursive_mutex> lock(_mx);
@@ -650,10 +657,10 @@ Channel::Ptr VideoStackManager::createChannel(const std::string& id, int width, 
         player = createPlayer(id);
     }
 
-    auto refChn = std::make_shared<RefWrapper<Channel::Ptr>>(
-        std::make_shared<Channel>(id, width, height, pixfmt));
+    auto refChn = std::make_shared<RefWrapper<VideoChannel::Ptr>>(
+        std::make_shared<VideoChannel>(id, width, height, pixfmt));
     auto chn = refChn->acquire();
-    player->addChannel(chn);
+    player->addVideoChannel(chn);
 
     _channelMap[id + std::to_string(width) + std::to_string(height) + std::to_string(pixfmt)] =
         refChn;

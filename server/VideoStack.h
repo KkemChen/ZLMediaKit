@@ -28,7 +28,7 @@ private:
     T _entity;
 };
 
-class Channel;
+class VideoChannel;
 
 struct Param {
     using Ptr = std::shared_ptr<Param>;
@@ -41,7 +41,7 @@ struct Param {
     std::string id{};
 
     // runtime
-    std::weak_ptr<Channel> weak_chn;
+    std::weak_ptr<VideoChannel> weak_chn;
     std::weak_ptr<mediakit::FFmpegFrame> weak_buf;
 
     ~Param();
@@ -49,11 +49,11 @@ struct Param {
 
 using Params = std::shared_ptr<std::vector<Param::Ptr>>;
 
-class Channel : public std::enable_shared_from_this<Channel> {
+class VideoChannel : public std::enable_shared_from_this<VideoChannel> {
 public:
-    using Ptr = std::shared_ptr<Channel>;
+    using Ptr = std::shared_ptr<VideoChannel>;
 
-    Channel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
+    VideoChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
 
     void addParam(const std::weak_ptr<Param>& p);
 
@@ -96,49 +96,23 @@ private:
 class StackPlayer : public std::enable_shared_from_this<StackPlayer> {
 public:
     using Ptr = std::shared_ptr<StackPlayer>;
-    ~StackPlayer() { onRemoveAudioInput();}
+    
     StackPlayer(const std::string& url) : _url(url) {}
 
-    void addChannel(const std::weak_ptr<Channel>& chn);
+    void addVideoChannel(const std::weak_ptr<VideoChannel>& chn);
 
-    void addMixer(const std::string &url, const std::weak_ptr<AudioMixer> &mixer);
+    void addAudioChannel(const std::weak_ptr<AudioChannel> &chn);
 
     void play();
 
-    void onFrame(const mediakit::FFmpegFrame::Ptr& frame);
+    void onVideoFrame(const mediakit::FFmpegFrame::Ptr& frame);
+
+     void onAudioFrame(const mediakit::FFmpegFrame::Ptr &frame);
 
     void onDisconnect();
 
 protected:
     void rePlay(const std::string& url);
-
-    void onAddAudioInput() {
-        std::lock_guard<std::recursive_mutex> lock(_mx_mixer);
-        for (auto &it : _mixers) {
-            if (auto mixer = it.second.lock()) {
-                mixer->addAudioInput(_url, { 1, 1000 });
-            }
-        }
-    }
-
-    void onRemoveAudioInput() {
-        std::lock_guard<std::recursive_mutex> lock(_mx_mixer);
-        for (auto &it: _mixers) {
-            if (auto mixer = it.second.lock()) {
-                mixer->removeAudioInput(_url);
-            }
-        }
-    }
-
-    void onAudioFrame(const mediakit::FFmpegFrame::Ptr &frame) {
-        std::lock_guard<std::recursive_mutex> lock(_mx_mixer);
-        for (auto &it : _mixers) {
-            if (auto mixer = it.second.lock()) {
-                mixer->inputFrame(_url, frame);
-            }
-        }
-    }
-
 
 private:
     std::string _url;
@@ -149,11 +123,11 @@ private:
     toolkit::Timer::Ptr _timer;
     int _failedCount = 0;
 
-    std::recursive_mutex _mx_chn;
-    std::vector<std::weak_ptr<Channel>> _channels;
+    std::recursive_mutex _mx_video_chn;
+    std::vector<std::weak_ptr<VideoChannel>> _video_channels;
 
-   std::recursive_mutex _mx_mixer;
-    std::map<std::string, std::weak_ptr<AudioMixer>> _mixers;
+    std::recursive_mutex _mx_audio_chn;
+    std::vector<std::weak_ptr<AudioChannel>> _audio_channels;
 };
 
 class VideoStack {
@@ -168,16 +142,26 @@ public:
 
     void setParam(const Params& params);
     void setMixer(const std::map<std::string, std::weak_ptr<StackPlayer>> &players) {
-        for (auto &it : players) {
-            if (auto player = it.second.lock()) {
-                player->addMixer(_id, _mixer);
+        std::vector<std::string> ids;
+        for (auto& it : players) {
+            ids.push_back(it.first);
+        }
+        auto tmp = _mixer->getAudioChannel(ids);
+        for (auto &it : tmp) {
+            auto player_it = players.find(it.first);
+            if (player_it != players.end()) {
+                if (auto player = player_it->second.lock()) {
+                    player->addAudioChannel(it.second);
+                }
             }
         }
     }
-
-    void start();
+     
+    void run();
 
 protected:
+    void start();
+
     void initBgColor();
 
 public:
@@ -193,7 +177,6 @@ private:
     float _fps;
     int _bitRate;
 
-    int64_t _total_samples = 0;
     AudioMixer::Ptr _mixer;
     mediakit::DevChannel::Ptr _dev;
 
@@ -219,7 +202,7 @@ public:
 public:
     static VideoStackManager& Instance();
 
-    Channel::Ptr getChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
+    VideoChannel::Ptr getChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
 
     void unrefChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
 
@@ -233,7 +216,7 @@ protected:
     Params parseParams(const Json::Value& json, std::string& id, int& width, int& height);
 
 protected:
-    Channel::Ptr createChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
+    VideoChannel::Ptr createChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
 
     StackPlayer::Ptr createPlayer(const std::string& id);
 
@@ -245,7 +228,7 @@ private:
 
     std::unordered_map<std::string, VideoStack::Ptr> _stackMap;
 
-    std::unordered_map<std::string, RefWrapper<Channel::Ptr>::Ptr> _channelMap;
+    std::unordered_map<std::string, RefWrapper<VideoChannel::Ptr>::Ptr> _channelMap;
     
     std::unordered_map<std::string, RefWrapper<StackPlayer::Ptr>::Ptr> _playerMap;
 };
