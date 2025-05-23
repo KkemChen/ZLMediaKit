@@ -1025,6 +1025,69 @@ void installWebApi() {
             });
     });
 
+    // 获取所有流观看者列表
+    api_regist("/index/api/getAllMediaPlayerList", [](API_ARGS_MAP_ASYNC) {
+        CHECK_SECRET();
+
+        // 1. 收集所有流
+        std::list<MediaSource::Ptr> media_list;
+        MediaSource::for_each_media([&](const MediaSource::Ptr &media) { media_list.emplace_back(media); });
+
+        auto total = std::make_shared<size_t>(media_list.size());
+        auto finished = std::make_shared<size_t>(0);
+        auto data = std::make_shared<Value>(arrayValue);
+
+        if (media_list.empty()) {
+            val["code"] = API::Success;
+            val["data"] = *data;
+            invoker(200, headerOut, val.toStyledString());
+            return;
+        }
+
+        // 2. 遍历所有流，分别查询players
+        for (auto &media : media_list) {
+
+            // 先保存流的四元组信息
+            std::string schema = media->getSchema();
+            std::string vhost = media->getMediaTuple().vhost;
+            std::string app = media->getMediaTuple().app;
+            std::string stream = media->getMediaTuple().stream;
+
+            media->getPlayerList(
+                [=](const std::list<toolkit::Any> &info_list) mutable {
+                    Value item(objectValue);
+                    Value players(arrayValue);
+                    for (auto &info : info_list) {
+                        players.append(info.get<Value>());
+                    }
+
+                    if (!players.empty()) {
+                        item["players"] = players;
+                        item["schema"] = schema;
+                        item["vhost"] = vhost;
+                        item["app"] = app;
+                        item["stream"] = stream;
+                        data->append(item);
+                    }
+
+                    if (++(*finished) == *total) {
+                        val["code"] = API::Success;
+                        val["data"] = *data;
+                        invoker(200, headerOut, val.toStyledString());
+                    }
+                },
+                [](toolkit::Any &&info) -> toolkit::Any {
+                    auto obj = std::make_shared<Value>();
+                    auto &session = info.get<Session>();
+                    fillSockInfo(*obj, &session);
+                    (*obj)["typeid"] = toolkit::demangle(typeid(session).name());
+                    toolkit::Any ret;
+                    ret.set(obj);
+                    return ret;
+                });
+        }
+    });
+
     api_regist("/index/api/broadcastMessage", [](API_ARGS_MAP) {
         CHECK_SECRET();
         CHECK_ARGS("schema", "vhost", "app", "stream", "msg");

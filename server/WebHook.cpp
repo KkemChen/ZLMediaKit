@@ -510,6 +510,7 @@ void installWebHook() {
             dumpMediaTuple(sender.getMediaTuple(), body);
             body["regist"] = bRegist;
         }
+        body["params"] = sender.getMediaTuple().params;
         // 执行hook  [AUTO-TRANSLATED:1df68201]
         // Execute hook
         do_http_hook(hook_stream_changed, body, nullptr);
