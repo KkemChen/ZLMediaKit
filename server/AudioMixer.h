@@ -35,10 +35,7 @@ public:
 
     void inputFrame(const mediakit::FFmpegFrame::Ptr &frame){
         std::lock_guard<std::mutex> lock(mx_fifo);
-        int ret = av_audio_fifo_write(fifo.get(), (void **)frame->get()->extended_data, frame->get()->nb_samples);
-        if (ret < 0) {
-            // TODO: 处理错误
-        }
+        av_audio_fifo_write(fifo.get(), (void **)frame->get()->extended_data, frame->get()->nb_samples);
     }
 
    mediakit::FFmpegFrame::Ptr readSamples(int samples = SAMPLE_SIZE) {
@@ -46,12 +43,10 @@ public:
        int available = av_audio_fifo_size(fifo.get());
        int toRead = MIN(samples, available);
 
-       // 创建AVFrame
        std::shared_ptr<AVFrame> frame(av_frame_alloc(), [](AVFrame *f) {
-           if (f)
-               av_frame_free(&f);
+           if (f) av_frame_free(&f);
        });
-       frame->nb_samples = samples; // 直接设置目标采样数
+       frame->nb_samples = samples;
        frame->format = SAMPLE_FORMAT;
        frame->sample_rate = SAMPLE_RATE;
        AVChannelLayout mono_layout;
@@ -112,34 +107,9 @@ public:
         }
     }
 
-
-    void addAudioChannel(const std::string &id, const std::shared_ptr<AudioChannel> &channel) {
+    void setAudioChannels(const std::vector<std::weak_ptr<AudioChannel>> &channels) {
         std::lock_guard<std::mutex> lock(_mx);
-        _channels[id] = channel;
-    }
-
-    std::map<std::string, std::weak_ptr<AudioChannel>> getAudioChannel(const std::vector<std::string> &ids) {
-        std::map<std::string, std::weak_ptr<AudioChannel>> ret;
-        // 1. 新增新的channel
-        for (const auto &id : ids) {
-            if (_channels.find(id) == _channels.end()) {
-                // 如果map中没有该id，则创建新的AudioChannel对象
-                auto chn = std::make_shared<AudioChannel>();
-                _channels[id] = chn;
-                ret[id] = chn;
-            }
-        }
-
-        // 2. 删除多余的channel（即_map有但ids中没有的）
-        for (auto it = _channels.begin(); it != _channels.end();) {
-            if (std::find(ids.begin(), ids.end(), it->first) == ids.end()) {
-                // 如果该id不在ids中，删除
-                it = _channels.erase(it); // erase会返回下一个有效的迭代器
-            } else {
-                ++it;
-            }
-        }
-        return ret;
+        _channels = channels;
     }
 
     void setOnOutputFrame(const std::function<void(const std::shared_ptr<AVPacket> &, const std::array<uint8_t, 7>& )> &cb) { _cb = cb; }
@@ -168,13 +138,12 @@ public:
                 std::vector<mediakit::FFmpegFrame::Ptr> frames;
                 {
                     std::lock_guard<std::mutex> lock(_mx);
-                   
-                   for (auto &it : _channels) {
-                       if (it.first.empty()) continue;
-                       auto frame = it.second->readSamples(AudioChannel::SAMPLE_SIZE);
-                       if (frame) {
-                           frames.push_back(frame);
-                       } 
+                   for (auto &weak_chn : _channels) {
+                       if (auto chn = weak_chn.lock()) {
+                           if (auto frame = chn->readSamples(AudioChannel::SAMPLE_SIZE)) {
+                               frames.push_back(frame);
+                           } 
+                       }
                    }
                 }
 
@@ -207,7 +176,7 @@ public:
                     float *data = reinterpret_cast<float *>(f->extended_data[0]);
 
                     // 归一化音量
-                    // normalize_volume_float(data, f->nb_samples, 0.6f);
+                    normalize_volume_float(data, f->nb_samples, 0.5f);
 
                     for (int i = 0; i < AudioChannel::SAMPLE_SIZE; ++i) {
                         float sample = mix_data[i] + data[i];
@@ -266,7 +235,7 @@ protected:
         _enc_ctx->bit_rate = 32000; // 可以自行设置
         _enc_ctx->profile = FF_PROFILE_AAC_LOW;
         _enc_ctx->time_base = { 1, 1000 };
-        // AAC一些编码器需要extra_data
+
         if (avcodec_open2(_enc_ctx.get(), codec, nullptr) < 0) {
             WarnL << "Could not open encoder";
             return;
@@ -391,7 +360,7 @@ protected:
 
 private:
     std::mutex _mx;
-    std::map<std::string, std::shared_ptr<AudioChannel>> _channels;
+    std::vector<std::weak_ptr<AudioChannel>> _channels;
 
     std::function<void(const std::shared_ptr<AVPacket>& pkt,const std::array<uint8_t, 7>& adtsHeader)> _cb;
 

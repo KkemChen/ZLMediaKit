@@ -32,9 +32,9 @@ static void fill_yuv_func(const mediakit::FFmpegFrame::Ptr &frame, int y, int u,
 INSTANCE_IMP(VideoStackManager)
 
 Param::~Param() {
-    auto strongChn= weak_chn.lock();
+    auto strongChn= video_chn.lock();
     if (!strongChn) { return; }
-    VideoStackManager::Instance().unrefChannel(id, width, height, pixfmt); 
+    VideoStackManager::Instance().unrefVideoChannel(id, width, height, pixfmt); 
 }
 
 VideoChannel::VideoChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt)
@@ -367,7 +367,7 @@ VideoStack::VideoStack(const std::string& id, int width, int height, AVPixelForm
 
     _mixer = std::make_shared<AudioMixer>();
     _mixer->setOnOutputFrame([&](const std::shared_ptr<AVPacket> &pkt, const std::array<uint8_t, 7>& adtsHeader) {
-        _dev->inputAAC((char*)pkt->data, pkt->size, pkt->pts, (char*)adtsHeader.data());
+        _dev->inputAAC((char*)pkt->data, pkt->size, pkt->pts, (const char*)adtsHeader.data());
     });
 
     _dev->addTrackCompleted();
@@ -392,7 +392,7 @@ void VideoStack::setParam(const Params& params) {
     for (auto& p : (*params)) {
         if (!p) continue;
         p->weak_buf = _buffer;
-        if (auto chn = p->weak_chn.lock()) {
+        if (auto chn = p->video_chn.lock()) {
             chn->addParam(p);
             chn->fillBuffer(p);
         }
@@ -439,25 +439,25 @@ void VideoStack::initBgColor() {
     fill_yuv_func(_buffer, Y, U, V);
 }
 
-VideoChannel::Ptr VideoStackManager::getChannel(const std::string& id, int width, int height,
+VideoChannel::Ptr VideoStackManager::getVideoChannel(const std::string& id, int width, int height,
                                            AVPixelFormat pixfmt) {
 
     std::lock_guard<std::recursive_mutex> lock(_mx);
     auto key = id + std::to_string(width) + std::to_string(height) + std::to_string(pixfmt);
-    auto it = _channelMap.find(key);
-    if (it != _channelMap.end()) { return it->second->acquire(); }
+    auto it = _videoChannelMap.find(key);
+    if (it != _videoChannelMap.end()) { return it->second->acquire(); }
 
-    return createChannel(id, width, height, pixfmt);
+    return createVideoChannel(id, width, height, pixfmt);
 }
 
-void VideoStackManager::unrefChannel(const std::string& id, int width, int height,
+void VideoStackManager::unrefVideoChannel(const std::string& id, int width, int height,
                                      AVPixelFormat pixfmt) {
 
     std::lock_guard<std::recursive_mutex> lock(_mx);
     auto key = id + std::to_string(width) + std::to_string(height) + std::to_string(pixfmt);
-    auto chn_it = _channelMap.find(key);
-    if (chn_it != _channelMap.end() && chn_it->second->dispose()) {
-        _channelMap.erase(chn_it);
+    auto chn_it = _videoChannelMap.find(key);
+    if (chn_it != _videoChannelMap.end() && chn_it->second->dispose()) {
+        _videoChannelMap.erase(chn_it);
 
         auto player_it = _playerMap.find(id);
         if (player_it != _playerMap.end() && player_it->second->dispose()) {
@@ -465,6 +465,38 @@ void VideoStackManager::unrefChannel(const std::string& id, int width, int heigh
         }
     }
 }
+
+
+std::vector < std::weak_ptr<AudioChannel>> VideoStackManager::getAudioChannel(const std::string &id, const std::set<std::string> &player_ids) {
+    std::vector<std::weak_ptr<AudioChannel>> ret;
+    std::set<std::string> tmp_ids;
+    std::lock_guard<std::recursive_mutex> lock(_mx);
+    for (auto &player_id : player_ids) {
+        if (player_id.empty()) continue;
+        auto key = id + player_id;
+        tmp_ids.insert(key);
+        AudioChannel::Ptr chn;
+        auto it = _audioChannelMap.find(key);
+        if(it != _audioChannelMap.end()) {
+            chn = it->second;
+        } else {
+            chn = createAudioChannel(id, player_id);
+        }
+        ret.push_back(chn);
+    }
+
+    for (auto it = _audioChannelMap.begin(); it != _audioChannelMap.end();) {
+        if (std::find(tmp_ids.begin(), tmp_ids.end(), it->first) == tmp_ids.end()) {
+            it = _audioChannelMap.erase(it);
+            std::cout << "remove audio channel:" << it->first << std::endl;
+        } else {
+            ++it;
+        }
+    }
+
+    return ret;
+}
+
 
 int VideoStackManager::startVideoStack(const Json::Value& json) {
 
@@ -478,16 +510,16 @@ int VideoStackManager::startVideoStack(const Json::Value& json) {
     }
 
     auto stack = std::make_shared<VideoStack>(id, width, height);
-    std::map<std::string, std::weak_ptr<StackPlayer>> players;
-
+    
+    std::set<std::string> player_ids;
     for (auto& p : (*params)) {
         if (!p) continue;
-        p->weak_chn = getChannel(p->id, p->width, p->height, p->pixfmt);
-        players[p->id] = _playerMap[p->id]->weak();
+        p->video_chn = getVideoChannel(p->id, p->width, p->height, p->pixfmt);
+        player_ids.insert(p->id);
     }
 
     stack->setParam(params);
-    stack->setMixer(players);
+    stack->setMixer(getAudioChannel(id, player_ids));
     stack->run();
 
     std::lock_guard<std::recursive_mutex> lock(_mx);
@@ -512,16 +544,16 @@ int VideoStackManager::resetVideoStack(const Json::Value& json) {
         if (it == _stackMap.end()) { return -2; }
         stack = it->second;
     }
-    std::map<std::string, std::weak_ptr<StackPlayer>> players;
+    std::set<std::string> player_ids;
 
     for (auto& p : (*params)) {
         if (!p) continue;
-        p->weak_chn = getChannel(p->id, p->width, p->height, p->pixfmt);
-        players[p->id] = _playerMap[p->id]->weak();
+        p->video_chn = getVideoChannel(p->id, p->width, p->height, p->pixfmt);
+        player_ids.insert(p->id);
     }
 
     stack->setParam(params);
-    stack->setMixer(players);
+    stack->setMixer(getAudioChannel(id, player_ids));
     return 0;
 }
 
@@ -645,7 +677,7 @@ bool VideoStackManager::loadBgImg(const std::string& path) {
 
 void VideoStackManager::clear() { _stackMap.clear(); }
 
-VideoChannel::Ptr VideoStackManager::createChannel(const std::string& id, int width, int height,
+VideoChannel::Ptr VideoStackManager::createVideoChannel(const std::string& id, int width, int height,
                                               AVPixelFormat pixfmt) {
 
     std::lock_guard<std::recursive_mutex> lock(_mx);
@@ -662,8 +694,7 @@ VideoChannel::Ptr VideoStackManager::createChannel(const std::string& id, int wi
     auto chn = refChn->acquire();
     player->addVideoChannel(chn);
 
-    _channelMap[id + std::to_string(width) + std::to_string(height) + std::to_string(pixfmt)] =
-        refChn;
+    _videoChannelMap[id + std::to_string(width) + std::to_string(height) + std::to_string(pixfmt)] = refChn;
     return chn;
 }
 
@@ -677,5 +708,15 @@ StackPlayer::Ptr VideoStackManager::createPlayer(const std::string& id) {
     if (!id.empty()) { player->play(); }
 
     return player;
+}
+
+AudioChannel::Ptr VideoStackManager::createAudioChannel(const std::string &id, const std::string& player_id) {
+    std::lock_guard<std::recursive_mutex> lock(_mx);
+    auto player = _playerMap[player_id]->weak();
+    auto chn = std::make_shared<AudioChannel>();
+    player->addAudioChannel(chn);
+
+    _audioChannelMap[id + player_id] = chn;
+    return chn;
 }
 #endif

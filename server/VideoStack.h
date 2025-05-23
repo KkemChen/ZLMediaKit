@@ -41,7 +41,7 @@ struct Param {
     std::string id{};
 
     // runtime
-    std::weak_ptr<VideoChannel> weak_chn;
+    std::weak_ptr<VideoChannel> video_chn;
     std::weak_ptr<mediakit::FFmpegFrame> weak_buf;
 
     ~Param();
@@ -141,20 +141,8 @@ public:
     ~VideoStack();
 
     void setParam(const Params& params);
-    void setMixer(const std::map<std::string, std::weak_ptr<StackPlayer>> &players) {
-        std::vector<std::string> ids;
-        for (auto& it : players) {
-            ids.push_back(it.first);
-        }
-        auto tmp = _mixer->getAudioChannel(ids);
-        for (auto &it : tmp) {
-            auto player_it = players.find(it.first);
-            if (player_it != players.end()) {
-                if (auto player = player_it->second.lock()) {
-                    player->addAudioChannel(it.second);
-                }
-            }
-        }
+    void setMixer(const std::vector<std::weak_ptr<AudioChannel>>& channels) {
+        _mixer->setAudioChannels(channels);
     }
      
     void run();
@@ -202,9 +190,11 @@ public:
 public:
     static VideoStackManager& Instance();
 
-    VideoChannel::Ptr getChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
+    VideoChannel::Ptr getVideoChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
 
-    void unrefChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
+    void unrefVideoChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
+
+    std::vector<std::weak_ptr<AudioChannel>> getAudioChannel(const std::string &id, const std::set<std::string>& player_ids); 
 
     bool loadBgImg(const std::string& path);
 
@@ -216,9 +206,11 @@ protected:
     Params parseParams(const Json::Value& json, std::string& id, int& width, int& height);
 
 protected:
-    VideoChannel::Ptr createChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
+    VideoChannel::Ptr createVideoChannel(const std::string& id, int width, int height, AVPixelFormat pixfmt);
 
     StackPlayer::Ptr createPlayer(const std::string& id);
+
+    AudioChannel::Ptr createAudioChannel(const std::string &id, const std::string &player_id);
 
 private:
     mediakit::FFmpegFrame::Ptr _bgImg;
@@ -228,8 +220,8 @@ private:
 
     std::unordered_map<std::string, VideoStack::Ptr> _stackMap;
 
-    std::unordered_map<std::string, RefWrapper<VideoChannel::Ptr>::Ptr> _channelMap;
-    
+    std::unordered_map<std::string, AudioChannel::Ptr> _audioChannelMap;
+    std::unordered_map<std::string, RefWrapper<VideoChannel::Ptr>::Ptr> _videoChannelMap;
     std::unordered_map<std::string, RefWrapper<StackPlayer::Ptr>::Ptr> _playerMap;
 };
 #endif
