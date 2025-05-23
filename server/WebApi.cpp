@@ -1052,8 +1052,8 @@ void installWebApi() {
             std::string vhost = media->getMediaTuple().vhost;
             std::string app = media->getMediaTuple().app;
             std::string stream = media->getMediaTuple().stream;
-
-            
+            std::string originUrl = media->getOriginUrl();
+            auto &params = media->getMediaTuple().params;
             media->getPlayerList(
                 [=](const std::list<toolkit::Any> &info_list) mutable {
                     Value item(objectValue);
@@ -1068,6 +1068,8 @@ void installWebApi() {
                         item["vhost"] = vhost;
                         item["app"] = app;
                         item["stream"] = stream;
+                        item["originUrl"] = originUrl;
+                        item["params"] = params;
                         data->append(item);
                     }
 
