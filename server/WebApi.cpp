@@ -1084,6 +1084,7 @@ void installWebApi() {
                     auto &session = info.get<Session>();
                     fillSockInfo(*obj, &session);
                     (*obj)["typeid"] = toolkit::demangle(typeid(session).name());
+                    (*obj)["params"] = session.getParams();
                     toolkit::Any ret;
                     ret.set(obj);
                     return ret;

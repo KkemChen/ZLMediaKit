@@ -63,9 +63,12 @@ void HlsCookieData::addReaderCount() {
                 *added = false;
             });
             std::weak_ptr<Session> weak_session = _session;
-            _ring_reader->setGetInfoCB([weak_session]() {
+            auto info = _info;
+            _ring_reader->setGetInfoCB([weak_session, info]() {
                 Any ret;
-                ret.set(std::static_pointer_cast<Session>(weak_session.lock()));
+                auto session = std::dynamic_pointer_cast<Session>(weak_session.lock());
+                session->setParams(info.params);
+                ret.set(session);
                 return ret;
             });
         }
