@@ -8,7 +8,6 @@
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <array>
@@ -21,16 +20,13 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
-// Optimized Dynamic FFmpeg Audio Mixer with proper synchronization to prevent segfaults.
-// Now contains an internal AVAudioFifo so the callback always receives frames
-// with exactly 1024 samples (nb_samples == 1024).
 class AudioMixer {
 public:
-    using Ptr = std::shared_ptr<AudioMixer>;
-    constexpr static int SAMPLE_RATE = 48000;
-    constexpr static int SAMPLE_SIZE = 1024;
-    constexpr static int CHANNELS = 1;
-    constexpr static int BIT_PER_SAMPLE = 32;
+    using Ptr                                     = std::shared_ptr<AudioMixer>;
+    constexpr static int SAMPLE_RATE              = 48000;
+    constexpr static int SAMPLE_SIZE              = 1024;
+    constexpr static int CHANNELS                 = 1;
+    constexpr static int BIT_PER_SAMPLE           = 32;
     constexpr static AVSampleFormat SAMPLE_FORMAT = AV_SAMPLE_FMT_FLTP;
 
     struct AudioInput {
@@ -43,44 +39,49 @@ public:
     };
 
     AudioMixer() {
-    #if LIBAVFILTER_VERSION_MAJOR < 7
+#if LIBAVFILTER_VERSION_MAJOR < 7
         avfilter_register_all();
-    #endif
-        _running = true;
+#endif
+        _running      = true;
         _outputThread = std::thread(&AudioMixer::outputThreadFunc, this);
     }
 
     ~AudioMixer() {
         {
-            std::lock_guard<std::mutex> lock(_stateMutex);
+            std::lock_guard<std::mutex> lock(_graphMutex);
             _running = false;
         }
         _outputCv.notify_one();
         if (_outputThread.joinable())
             _outputThread.join();
         {
-            std::lock_guard<std::mutex> fLock(_filterMutex);
-            cleanupFilterGraphUnlocked();
+            std::lock_guard<std::mutex> lock(_graphMutex);
+            cleanupFilterGraph();
         }
     }
 
     bool addAudioInput(const std::string &id, AVRational timeBase) {
-        std::lock_guard<std::mutex> lock(_stateMutex);
+        std::lock_guard<std::mutex> lock(_graphMutex);
+        
         if (_inputs.count(id))
             return false;
-        auto input = std::make_unique<AudioInput>();
-        input->name = "in" + id;
+            
+        auto input      = std::make_unique<AudioInput>();
+        input->name     = "in" + id;
         input->timeBase = timeBase;
         _inputs.emplace(id, std::move(input));
-        _needRebuild = true;
+        
+        rebuildFilterGraph();
         return true;
     }
 
     bool removeAudioInput(const std::string &id) {
-        std::lock_guard<std::mutex> lock(_stateMutex);
+        std::lock_guard<std::mutex> lock(_graphMutex);
+        
         auto it = _inputs.find(id);
         if (it == _inputs.end())
             return false;
+            
         it->second->active = false;
         {
             std::lock_guard<std::mutex> ql(it->second->queueMutex);
@@ -88,44 +89,37 @@ public:
             std::swap(it->second->frameQueue, empty);
         }
         _inputs.erase(it);
-        _needRebuild = true;
+        
+        rebuildFilterGraph();
         return true;
     }
 
-    void inputFrame(const std::string &id, mediakit::FFmpegFrame::Ptr frame) {
-        AudioInput *input = nullptr;
-        bool rebuild = false;
-        {
-            std::lock_guard<std::mutex> lock(_stateMutex);
-            auto it = _inputs.find(id);
-            if (it == _inputs.end() || !it->second->active)
-                return;
-            input = it->second.get();
-            rebuild = _needRebuild;
-        }
-
-        if (rebuild) {
-            {
-                std::lock_guard<std::mutex> ql(input->queueMutex);
-                input->frameQueue.push(frame);
-            }
-            rebuildFilterGraph();
-            processQueuedFrames();
-        } else {
-            lockAndInput(id, frame);
-        }
+    void inputFrame(const std::string &id, const mediakit::FFmpegFrame::Ptr& frame) {
+        std::lock_guard<std::mutex> lock(_graphMutex);
+        
+        auto it = _inputs.find(id);
+        if (it == _inputs.end() || !it->second->active || !_initialized)
+            return;
+            
+        AVFilterContext *ctx = it->second->bufferSrc;
+        if (!ctx) return;
+        
+        AVFrame *avf = frame->get();
+        if (!avf) return;
+        
+        av_buffersrc_add_frame_flags(ctx, avf, AV_BUFFERSRC_FLAG_KEEP_REF);
         _outputCv.notify_one();
     }
 
-    void setOutputCallback(const std::function<void(const std::shared_ptr<AVPacket>&, const std::array<uint8_t, 7>&)>& cb) {
+    void setOutputCallback(const std::function<void(const std::shared_ptr<AVPacket> &, const std::array<uint8_t, 7> &)> &cb) {
         _cb = cb;
     }
 
     void flush() {
-        std::lock_guard<std::mutex> lock(_stateMutex);
+        std::lock_guard<std::mutex> lock(_graphMutex);
         if (!_initialized)
             return;
-        std::lock_guard<std::mutex> fLock(_filterMutex);
+            
         for (auto &kv : _inputs) {
             if (kv.second->bufferSrc) {
                 av_buffersrc_add_frame_flags(kv.second->bufferSrc, nullptr, 0);
@@ -134,7 +128,6 @@ public:
         _outputCv.notify_one();
     }
 
-
 protected:
     void init_codec_context() {
         auto codec = const_cast<AVCodec *>(avcodec_find_encoder(AV_CODEC_ID_AAC));
@@ -142,48 +135,51 @@ protected:
             WarnL << "FFmpeg AAC encoder not found";
             return;
         }
-        _enc_ctx.reset(avcodec_alloc_context3(codec), [](AVCodecContext *ptr) {
-            if (ptr) {
-                avcodec_free_context(&ptr);
-            }
-        });
+        _encCtx.reset(
+            avcodec_alloc_context3(codec), [](AVCodecContext *ptr) {
+                if (ptr) {
+                    avcodec_free_context(&ptr);
+                }
+            });
 
-        if (!_enc_ctx) {
+        if (!_encCtx) {
             WarnL << "Could not alloc codec context";
             return;
         }
 
-        _enc_ctx->sample_fmt = AudioMixer::SAMPLE_FORMAT;
-        _enc_ctx->sample_rate = AudioMixer::SAMPLE_RATE;
+        _encCtx->sample_fmt  = AudioMixer::SAMPLE_FORMAT;
+        _encCtx->sample_rate = AudioMixer::SAMPLE_RATE;
         AVChannelLayout mono_layout;
         av_channel_layout_from_string(&mono_layout, "mono");
-        _enc_ctx->ch_layout = mono_layout;
+        _encCtx->ch_layout = mono_layout;
         av_channel_layout_uninit(&mono_layout);
-        _enc_ctx->ch_layout.nb_channels = AudioMixer::CHANNELS;
-        _enc_ctx->bit_rate = 32000; // 可以自行设置
-        _enc_ctx->profile = FF_PROFILE_AAC_LOW;
-        _enc_ctx->time_base = { 1, 1000 };
+        _encCtx->ch_layout.nb_channels = AudioMixer::CHANNELS;
+        _encCtx->bit_rate              = 32000;
+        _encCtx->profile               = FF_PROFILE_AAC_LOW;
+        _encCtx->time_base             = { 1, 1000 };
 
-        if (avcodec_open2(_enc_ctx.get(), codec, nullptr) < 0) {
+        if (avcodec_open2(_encCtx.get(), codec, nullptr) < 0) {
             WarnL << "Could not open encoder";
             return;
         }
     }
+
     std::shared_ptr<AVPacket> encode_aac(const std::shared_ptr<AVFrame> &frame) {
-        if (!_enc_ctx) {
+        if (!_encCtx) {
             init_codec_context();
         }
-        if (_enc_ctx) {
-            int ret = avcodec_send_frame(_enc_ctx.get(), frame.get());
+        if (_encCtx) {
+            int ret = avcodec_send_frame(_encCtx.get(), frame.get());
             if (ret < 0) {
                 return nullptr;
             }
 
-            std::shared_ptr<AVPacket> pkt(av_packet_alloc(), [](AVPacket *p) {
-                if (p)
-                    av_packet_free(&p);
-            });
-            ret = avcodec_receive_packet(_enc_ctx.get(), pkt.get());
+            std::shared_ptr<AVPacket> pkt(
+                av_packet_alloc(), [](AVPacket *p) {
+                    if (p)
+                        av_packet_free(&p);
+                });
+            ret = avcodec_receive_packet(_encCtx.get(), pkt.get());
             if (ret < 0) {
                 return nullptr;
             }
@@ -193,7 +189,6 @@ protected:
     }
 
     std::array<uint8_t, 7> createADTSHeader(int sampleRate, int channels, int frameLength) {
-
         auto getSampleRateIndex = [](int sampleRate) -> int {
             switch (sampleRate) {
                 case 96000: return 0;
@@ -213,18 +208,14 @@ protected:
             }
         };
 
-        std::array<uint8_t, 7> adtsHeader {};
+        std::array<uint8_t, 7> adtsHeader{};
 
-        // AAC LC profile (Low Complexity profile)
         int profile = 1; // AAC LC
-
         int sampleRateIndex = getSampleRateIndex(sampleRate);
-
         int fullFrameLength = frameLength + 7;
 
         adtsHeader[0] = 0xFF;
-        adtsHeader[1] = 0xF1; // MPEG-4, NO CRC
-
+        adtsHeader[1] = 0xF1;
         adtsHeader[2] = (uint8_t)(((profile - 1) << 6) + (sampleRateIndex << 2) + (channels >> 2));
         adtsHeader[3] = (uint8_t)(((channels & 3) << 6) + (fullFrameLength >> 11));
         adtsHeader[4] = (uint8_t)((fullFrameLength & 0x7FF) >> 3);
@@ -234,15 +225,13 @@ protected:
         return adtsHeader;
     }
 
-
 protected:
-    ////////////////////////////// INTERNAL HELPERS ////////////////////////////
-    void cleanupFilterGraphUnlocked() {
+    void cleanupFilterGraph() {
         if (_graph) {
             avfilter_graph_free(&_graph);
-            _graph = nullptr;
-            _amixCtx = nullptr;
-            _sinkCtx = nullptr;
+            _graph       = nullptr;
+            _amixCtx     = nullptr;
+            _sinkCtx     = nullptr;
             _initialized = false;
         }
         if (_fifo) {
@@ -252,26 +241,18 @@ protected:
     }
 
     void rebuildFilterGraph() {
-        // Lock graph
-        std::lock_guard<std::mutex> fLock(_filterMutex);
-
-        // Gather active inputs snapshot
+        cleanupFilterGraph();
+        // Gather active inputs
         std::vector<AudioInput *> act;
-        {
-            std::lock_guard<std::mutex> sLock(_stateMutex);
-            for (auto &kv : _inputs) {
-                if (kv.second->active)
-                    act.push_back(kv.second.get());
-            }
-            if (act.empty()) {
-                cleanupFilterGraphUnlocked();
-                _needRebuild = false;
-                return;
-            }
+        for (auto &kv : _inputs) {
+            if (kv.second->active)
+                act.push_back(kv.second.get());
+        }
+        
+        if (act.empty()) {
+            return;
         }
 
-        // Rebuild
-        cleanupFilterGraphUnlocked();
         _graph = avfilter_graph_alloc();
         if (!_graph)
             return;
@@ -303,7 +284,7 @@ protected:
         const AVFilter *sink = avfilter_get_by_name("abuffersink");
         avfilter_graph_create_filter(&_sinkCtx, sink, "out", nullptr, nullptr, _graph);
 
-        // Configure sink – omit channel_layouts, set explicit fmt/rate/channels
+        // Configure sink
         enum AVSampleFormat fmts[] = { SAMPLE_FORMAT, AV_SAMPLE_FMT_NONE };
         av_opt_set_int_list(_sinkCtx, "sample_fmts", fmts, AV_SAMPLE_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
         int rates[] = { SAMPLE_RATE, -1 };
@@ -313,84 +294,34 @@ protected:
 
         // Final link & config
         int ret = avfilter_link(_amixCtx, 0, _sinkCtx, 0);
-
         ret = avfilter_graph_config(_graph, nullptr);
         if (ret < 0) {
-            cleanupFilterGraphUnlocked();
+            ErrorL << "Could not configure filter graph";
+            cleanupFilterGraph();
             return;
         }
 
-        // Allocate FIFO (capacity for ~ 100 frames worth of samples)
+        // Allocate FIFO
         _fifo = av_audio_fifo_alloc(SAMPLE_FORMAT, 1, SAMPLE_SIZE * 120);
 
-        // Update state
-        {
-            std::lock_guard<std::mutex> sLock(_stateMutex);
-            _initialized = true;
-            _needRebuild = false;
-        }
-    }
-
-    void processQueuedFrames() {
-        // Collect queued frames
-        std::vector<std::pair<std::string, mediakit::FFmpegFrame::Ptr>> toProcess;
-        {
-            std::lock_guard<std::mutex> sLock(_stateMutex);
-            if (!_initialized)
-                return;
-            for (auto &kv : _inputs) {
-                auto *in = kv.second.get();
-                std::lock_guard<std::mutex> ql(in->queueMutex);
-                while (!in->frameQueue.empty()) {
-                    toProcess.emplace_back(kv.first, in->frameQueue.front());
-                    in->frameQueue.pop();
-                }
-            }
-        }
-        for (auto &p : toProcess) {
-            lockAndInput(p.first, p.second);
-        }
-    }
-
-    void lockAndInput(const std::string &id, mediakit::FFmpegFrame::Ptr frame) {
-        std::lock_guard<std::mutex> fLock(_filterMutex);
-        if (!_initialized)
-            return;
-        // Find bufferSrc under state lock
-        AVFilterContext *ctx = nullptr;
-        {
-            std::lock_guard<std::mutex> sLock(_stateMutex);
-            auto it = _inputs.find(id);
-            if (it == _inputs.end())
-                return;
-            ctx = it->second->bufferSrc;
-        }
-        if (!ctx)
-            return;
-        AVFrame *avf = frame->get();
-        if (!avf)
-            return;
-        av_buffersrc_add_frame_flags(ctx, avf, AV_BUFFERSRC_FLAG_KEEP_REF);
+        _initialized = true;
     }
 
     void outputThreadFunc() {
         std::unique_lock<std::mutex> lock(_outputMutex);
         while (true) {
-            _outputCv.wait(lock, [&] { return !_running || (_initialized); });
-            if (!_running)
-                break;
+            _outputCv.wait(lock, [&] { return !_running || _initialized; });
+
             checkOutput();
         }
     }
 
-    // Pulls frames from sinkCtx_, writes them into fifo_, and emits 1024-sample frames.
     void checkOutput() {
-        std::lock_guard<std::mutex> fLock(_filterMutex);
+        std::lock_guard<std::mutex> lock(_graphMutex);
         if (!_initialized || !_sinkCtx || !_fifo)
             return;
 
         while (true) {
-            // 1. Read from sink
             AVFrame *in = av_frame_alloc();
             if (!in)
                 break;
@@ -400,33 +331,29 @@ protected:
                 break;
             }
 
-            // 2. Push samples into FIFO
             av_audio_fifo_write(_fifo, (void **)in->extended_data, in->nb_samples);
-            int sampleRate = in->sample_rate;
-            auto channelLayout = in->ch_layout;
+            int sampleRate          = in->sample_rate;
+            auto channelLayout      = in->ch_layout;
             enum AVSampleFormat fmt = (enum AVSampleFormat)in->format;
             av_frame_free(&in);
 
-            // 3. While enough samples, pop 1024 and send out
             while (av_audio_fifo_size(_fifo) >= SAMPLE_SIZE) {
-                AVFrame *out = av_frame_alloc();
+                AVFrame *out    = av_frame_alloc();
                 out->nb_samples = SAMPLE_SIZE;
-                out->format = fmt;
-                out->ch_layout = channelLayout;
-                // out->channel_layout = channelLayout;
+                out->format     = fmt;
+                out->ch_layout  = channelLayout;
                 out->sample_rate = sampleRate;
-                // For mono we can derive channels from layout or set explicitly
                 out->ch_layout.nb_channels = CHANNELS;
 
                 if (av_frame_get_buffer(out, 0) < 0) {
                     av_frame_free(&out);
-                    break; // allocation failed – drop
+                    break;
                 }
 
                 av_audio_fifo_read(_fifo, (void **)out->extended_data, SAMPLE_SIZE);
 
-                int64_t pts_ms = _total_samples * 1000LL / out->sample_rate; //{1, 1000} timebase
-                _total_samples += out->nb_samples;
+                int64_t pts_ms = _totalSamples * 1000LL / out->sample_rate;
+                _totalSamples += out->nb_samples;
                 out->pts = pts_ms;
 
                 auto ptr = std::shared_ptr<AVFrame>(out, [](AVFrame *f) { av_frame_free(&f); });
@@ -442,34 +369,27 @@ protected:
         }
     }
 
-
-
 private:
     // FFmpeg filter graph contexts
-    AVFilterGraph *_graph = nullptr;
+    AVFilterGraph *_graph     = nullptr;
     AVFilterContext *_amixCtx = nullptr;
     AVFilterContext *_sinkCtx = nullptr;
-
     AVAudioFifo *_fifo = nullptr;
 
-    // Synchronization
-    std::mutex _stateMutex; // protects inputs_, initialized_, needRebuild_, running_
-    std::mutex _filterMutex; // protects graph_, amixCtx_, sinkCtx_, fifo_
+    mutable std::mutex _graphMutex; 
 
     // Input state
     std::map<std::string, std::unique_ptr<AudioInput>> _inputs;
     bool _initialized = false;
-    bool _needRebuild = false;
 
     // Output thread
     std::thread _outputThread;
-    std::atomic<bool> _running { false };
+    std::atomic<bool> _running{ false };
     std::condition_variable _outputCv;
-    std::mutex _outputMutex;
+    std::mutex _outputMutex;  
 
-
-    int64_t _total_samples = 0;
+    int64_t _totalSamples = 0;
     std::function<void(const std::shared_ptr<AVPacket> &pkt, const std::array<uint8_t, 7> &adtsHeader)> _cb;
 
-    std::shared_ptr<AVCodecContext> _enc_ctx;
+    std::shared_ptr<AVCodecContext> _encCtx;
 };
