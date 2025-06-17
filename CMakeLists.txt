@@ -37,7 +37,7 @@ option(ENABLE_API "Enable C API SDK" ON)
 option(ENABLE_API_STATIC_LIB "Enable mk_api static lib" OFF)
 option(ENABLE_ASAN "Enable Address Sanitize" OFF)
 option(ENABLE_CXX_API "Enable C++ API SDK" OFF)
-option(ENABLE_FAAC "Enable FAAC" ON)
+option(ENABLE_FAAC "Enable FAAC" OFF)
 option(ENABLE_FFMPEG "Enable FFmpeg" ON)
 option(ENABLE_HLS "Enable HLS" ON)
 option(ENABLE_JEMALLOC_STATIC "Enable static linking to the jemalloc library" OFF)
@@ -69,7 +69,7 @@ set(SOCKET_DEFAULT_BUF_SIZE 262144 CACHE STRING "Default buffer size for socket"
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
   set(CMAKE_BUILD_TYPE "Debug")
 endif()
-set(CMAKE_BUILD_TYPE "Release")
+#set(CMAKE_BUILD_TYPE "Release")
 message(STATUS "编译类型: ${CMAKE_BUILD_TYPE}")
 
 # 方便排查编译问题, 需要 FORCE CACHE, 否则需要命令行设置才生效

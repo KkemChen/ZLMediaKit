@@ -357,17 +357,8 @@ VideoStack::VideoStack(const std::string& id, int width, int height, AVPixelForm
     _dev->initAudio(a_info);
 
     _mixer = std::make_shared<AudioMixer>();
-    _mixer->setOutputCallback([&](mediakit::FFmpegFrame::Ptr frame) {
-        int bytes = av_samples_get_buffer_size(
-            NULL,
-            frame->get()->ch_layout.nb_channels, // 声道数
-            frame->get()->nb_samples, // 每声道采样数
-            AudioMixer::SAMPLE_FORMAT, // AVSampleFormat
-            1); // align=1 → 不加 32B 对齐
-
-        int64_t pts_ms = _total_samples * 1000LL / frame->get()->sample_rate;
-        _dev->inputPCM((char *)frame->get()->data[0], bytes, pts_ms);
-        _total_samples += frame->get()->nb_samples;
+    _mixer->setOutputCallback([&](const std::shared_ptr<AVPacket> &pkt, const std::array<uint8_t, 7> &adtsHeader) {
+        _dev->inputAAC((char *)pkt->data, pkt->size, pkt->pts, (const char *)adtsHeader.data());
     });
 
     _dev->addTrackCompleted();
