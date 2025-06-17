@@ -1025,7 +1025,7 @@ void installWebApi() {
             });
     });
 
-    // 获取所有流观看者列表
+    //获取所有流观看者列表
     api_regist("/index/api/getAllMediaPlayerList", [](API_ARGS_MAP_ASYNC) {
         CHECK_SECRET();
 
@@ -1052,7 +1052,8 @@ void installWebApi() {
             std::string vhost = media->getMediaTuple().vhost;
             std::string app = media->getMediaTuple().app;
             std::string stream = media->getMediaTuple().stream;
-
+            std::string originUrl = media->getOriginUrl();
+            auto &params = media->getMediaTuple().params;
             media->getPlayerList(
                 [=](const std::list<toolkit::Any> &info_list) mutable {
                     Value item(objectValue);
@@ -1060,13 +1061,15 @@ void installWebApi() {
                     for (auto &info : info_list) {
                         players.append(info.get<Value>());
                     }
-
-                    if (!players.empty()) {
+                    
+                   if (!players.empty()) {
                         item["players"] = players;
                         item["schema"] = schema;
                         item["vhost"] = vhost;
                         item["app"] = app;
                         item["stream"] = stream;
+                        item["originUrl"] = originUrl;
+                        item["params"] = params;
                         data->append(item);
                     }
 
@@ -1081,12 +1084,15 @@ void installWebApi() {
                     auto &session = info.get<Session>();
                     fillSockInfo(*obj, &session);
                     (*obj)["typeid"] = toolkit::demangle(typeid(session).name());
+                    (*obj)["params"] = session.getParams();
                     toolkit::Any ret;
                     ret.set(obj);
                     return ret;
                 });
         }
     });
+
+
 
     api_regist("/index/api/broadcastMessage", [](API_ARGS_MAP) {
         CHECK_SECRET();

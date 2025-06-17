@@ -46,9 +46,13 @@ void FlvMuxer::start(const EventPoller::Ptr &poller, const RtmpMediaSource::Ptr 
     std::weak_ptr<FlvMuxer> weak_self = getSharedPtr();
     media->pause(false);
     _ring_reader = media->getRing()->attach(poller);
-    _ring_reader->setGetInfoCB([weak_self]() {
+    auto params = media->getMediaTuple().params;
+    _ring_reader->setGetInfoCB([weak_self, params]() {
         Any ret;
-        ret.set(dynamic_pointer_cast<Session>(weak_self.lock()));
+        auto self = weak_self.lock();
+        auto session = dynamic_pointer_cast<Session>(self);
+        session->setParams(params);
+        ret.set(session);
         return ret;
     });
     _ring_reader->setDetachCB([weak_self]() {
